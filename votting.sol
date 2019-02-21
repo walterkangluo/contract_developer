@@ -168,34 +168,122 @@ contract CandidateManage {
     }
     
     // apply to candidate 
-    function ApplyToCandidate(address applicant, uint pledge, string memo) public returns(bool, string){
+    function ApplyToCandidate(uint pledge, string memo) public returns(bool, string){
         string memory errors;
         Candidate memory candidate;
   
-        require(Normal == getRole(applicant));
-        if(!candidateCriteria(applicant, pledge)){
+        require(Normal == getRole(msg.sender));
+        if(!candidateCriteria(msg.sender, pledge)){
             errors = "errors: some criterias not met.";
-            emit ApplyToCandidateEvent(applicant, false, errors);
+            emit ApplyToCandidateEvent(msg.sender, false, errors);
             return (false, errors);
         }
         
         candidate.memo = memo;
         candidate.isValid = true;
         candidate.pledge = pledge;
-        candidate.account = applicant;
-        candidate.ranking = adjustCandidateList(applicant, pledge);
+        candidate.account = msg.sender;
+        candidate.ranking = adjustCandidateList(msg.sender, pledge);
         
-        justitia.lockCount(applicant, pledge);
+        justitia.lockCount(msg.sender, pledge);
         totalPledge = totalPledge.add(pledge);
-        candidateLookup[applicant] = candidate;
-        balanceOfPledge[applicant] = balanceOfPledge[applicant].add(pledge);
-        emit ApplyToCandidateEvent(applicant, true, errors);
+        candidateLookup[msg.sender] = candidate;
+        balanceOfPledge[msg.sender] = balanceOfPledge[msg.sender].add(pledge);
+        emit ApplyToCandidateEvent(msg.sender, true, errors);
         return (true, errors);
     }
     
     // get candidates
     function Candidates() public view returns(address[]){
         return CandidateList;
+    }
+}
+
+
+/* 
+*  系统合约调用
+*  管理选举情况，包括：选举，取消选举，选举情况统计等
+*/
+contract ElectionManage is CandidateManage {
+    
+    using SafeMath for uint;
+  
+    uint constant ENTRY_HRESHOLD = 100;
+    uint constant MAINNET_ONLINE_THRESHOLD = 1000;
+    
+    event VottingEvent(address, address, uint);
+    event VottingCanceledEvent(address, address, uint);
+    
+    struct Election{
+        bool isValid;
+        address[] participates;
+        mapping(address => uint) election; 
+    }
+    mapping(address => Election) public candidateElection;
+
+    
+    function vote(address candidate, uint pledge) public {
+        uint8 role = getRole(msg.sender);
+        
+        require(isCandidate(candidate));
+        require(!isCandidate(candidate));
+        require(pledge <= justitia.residePledge(msg.sender));
+        
+        if(!candidateElection[candidate].isValid){
+            candidateElection[candidate].participates.push(msg.sender);
+            candidateElection[candidate].isValid = true;
+        }
+        
+        candidateElection[candidate].election[msg.sender] = candidateElection[candidate].election[msg.sender].add(pledge);
+        candidateLookup[candidate].pledge = candidateLookup[candidate].pledge.add(pledge);
+        adjustCandidateList(candidate, candidateLookup[candidate].pledge);
+        totalPledge = totalPledge.add(pledge);
+        emit VottingEvent(msg.sender, candidate, pledge);
+    }
+    
+    function cancelVotted(address candidate, uint pledge) public {
+        require(isCandidate(candidate));
+        require(pledge <= candidateElection[candidate].election[msg.sender]);
+        
+        candidateLookup[candidate].pledge = candidateLookup[candidate].pledge.sub(pledge);
+        candidateElection[candidate].election[msg.sender] = candidateElection[candidate].election[msg.sender].sub(pledge);
+        adjustCandidateList(candidate, candidateLookup[candidate].pledge);
+        totalPledge = totalPledge.sub(pledge);
+        emit VottingCanceledEvent(msg.sender, candidate, pledge);
+    }
+}
+
+
+contract CommunityManage is ElectionManage{
+    
+    bool public mainNetSwitch;
+    uint constant MAINNET_ONLINE_THRESHOLD = 1000;
+    
+     event MainNetOnlineEvent(uint, uint, uint);
+    
+    // try to online main network
+    function tryToOnlineMainNet() private {
+        if(!mainNetSwitch){
+            if(totalPledge >= MAINNET_ONLINE_THRESHOLD){
+                mainNetSwitch = true;
+                //emit MainNetOnlineEvent(now, justitia.totalSupply, totalPledge);
+            }
+        }
+    }
+    
+    function GetOnlineSymbol() public view returns(bool){
+        return mainNetSwitch;
+    }
+    
+    function CancelVote(address candidate, uint canceledPledge) public {
+        require(isCandidate(candidate));
+        cancelVotted(candidate, canceledPledge);
+    }
+    
+    function Votting(address candidate, uint pledge) public{
+        require(isCandidate(candidate));
+        vote(candidate, pledge);
+        tryToOnlineMainNet;
     }
 }
 
