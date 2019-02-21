@@ -37,7 +37,7 @@ contract JustitiaReputionToken {
     function unlockCount(address _account, uint _count) public;
     function residePledge(address _owner) public view returns(uint);
     
-    function balanceOf(address _owner) public returns (uint256 balance);
+    function balanceOf(address _owner) public view returns (uint256 balance);
     function transfer(address _to, uint256 _value) public returns (bool success);
     function transferFrom(address _from, address _to, uint256 _value) public returns (bool success);
     function approve(address _spender, uint256 _value) public returns (bool success);
@@ -48,11 +48,11 @@ contract CandidateManage {
     
     using SafeMath for uint;
     uint constant MINIMUM_PLEDGE_TOKEN = 100;
-    address public jrAddr = address(0xc00430870bd4d4bd891bf2424ae00277bd9a5f09);
-    JustitiaReputionToken public justitia = JustitiaReputionToken(0xc00430870bd4d4bd891bf2424ae00277bd9a5f09);
+    address public jrAddr = address(0x9f4c14f487b8e4e3986467c2a2aa5bde93052666);
+    JustitiaReputionToken public justitia = JustitiaReputionToken(0x9f4c14f487b8e4e3986467c2a2aa5bde93052666);
     
-     struct Candidate{
-        address candidate;
+    struct Candidate{
+        address account;
         uint pledge;
         uint ranking;   // rank of candidates
         string memo;
@@ -104,17 +104,21 @@ contract CandidateManage {
     function balanceStatistic(address _owner) public returns (uint256 balance, uint256 pledge){
         require(address(0) != _owner);
         
-        uint256 pledges;
-        pledges = justitia.balanceOf(_owner).sub(justitia.residePledge(_owner));
-        require(balanceOfPledge[_owner] == pledges);
+        uint256 total;
+        uint256 reside;
         
-        return (justitia.balanceOf(_owner), pledges);
+        total = justitia.balanceOf(_owner);
+        reside = justitia.residePledge(_owner);
+        
+        require(total.sub(reside) == balanceOfPledge[_owner]);
+        
+        return (total, balanceOfPledge[_owner]);
     }
     
     // get candidate information
     function candidateState(address candidate) public view returns(uint256, uint256, string){
         require(isCandidate(candidate));
-        return (candidateLookup[candidate].pledge, candidateLookup[candidate].ranking, candidateLookup[candidate].memo);
+        return (candidateLookup[candidate].ranking, candidateLookup[candidate].pledge, candidateLookup[candidate].memo);
     }
     
     // find index to insert the account by specified candidate in CandidateList
@@ -178,11 +182,15 @@ contract CandidateManage {
         candidate.memo = memo;
         candidate.isValid = true;
         candidate.pledge = pledge;
-        candidate.candidate = applicant;
+        candidate.account = applicant;
         candidate.ranking = adjustCandidateList(applicant, pledge);
-        candidateLookup[applicant] = candidate;
+        
         justitia.lockCount(applicant, pledge);
         totalPledge = totalPledge.add(pledge);
+        candidateLookup[applicant] = candidate;
+        balanceOfPledge[applicant] = balanceOfPledge[applicant].add(pledge);
+        emit ApplyToCandidateEvent(applicant, true, errors);
+        return (true, errors);
     }
     
     // get candidates
