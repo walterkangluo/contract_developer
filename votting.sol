@@ -30,12 +30,12 @@ library SafeMath {
     }
 }
 
-contract JustitiaReputionToken {
+contract JustitiaRight {
     uint256 public totalSupply;
     
     function lockCount(address _account, uint _count) public;
     function unlockCount(address _account, uint _count) public;
-    function residePledge(address _owner) public view returns(uint);
+    function residePledge(address _owner) public view returns(uint balance);
     
     function balanceOf(address _owner) public view returns (uint256 balance);
     function transfer(address _to, uint256 _value) public returns (bool success);
@@ -47,28 +47,25 @@ contract JustitiaReputionToken {
 contract CandidateManage {
     
     using SafeMath for uint;
+    uint256 public totalPledge;
+    uint8 constant public Normal = 1;
+    uint8 constant public Participate = 2;
+    uint8 constant public Candidator = 3;
     uint constant MINIMUM_PLEDGE_TOKEN = 100;
-    address public jrAddr = address(0x9f4c14f487b8e4e3986467c2a2aa5bde93052666);
-    JustitiaReputionToken public justitia = JustitiaReputionToken(0x9f4c14f487b8e4e3986467c2a2aa5bde93052666);
+  
+    JustitiaRight public justitia;
     
     struct Candidate{
         address account;
-        uint pledge;
-        uint ranking;   // rank of candidates
+        uint pledge;   // total support pledge
         string memo;
         bool isValid;
     }
     address [] public CandidateList;
     mapping(address => Candidate) public candidateLookup;
-    
-    uint8 constant public Normal = 1;
-    uint8 constant public Participate = 2;
-    uint8 constant public Candidator = 3;
-    
-    uint256 public totalPledge;
     // mapping(support, totalPledge)
     mapping(address => uint256) public balanceOfPledge;
-    
+
     // event define
     event ApplyToCandidateEvent(address, bool, string);
     
@@ -86,7 +83,7 @@ contract CandidateManage {
         return Normal;
     }
     
-    // criterias to be a candidate 
+    // criterias that be a candidate 
     function candidateCriteria(address candidate, uint256 pledge) public view returns(bool){
         uint256 balance = justitia.residePledge(candidate);
         if(MINIMUM_PLEDGE_TOKEN <= balance && balance >= pledge){
@@ -101,7 +98,7 @@ contract CandidateManage {
     }
     
     // get pledge balance of address
-    function balanceStatistic(address _owner) public returns (uint256 balance, uint256 pledge){
+    function balanceStatistic(address _owner) public view returns (uint256 balance, uint256 pledge){
         require(address(0) != _owner);
         
         uint256 total;
@@ -118,7 +115,13 @@ contract CandidateManage {
     // get candidate information
     function candidateState(address candidate) public view returns(uint256, uint256, string){
         require(isCandidate(candidate));
-        return (candidateLookup[candidate].ranking, candidateLookup[candidate].pledge, candidateLookup[candidate].memo);
+        uint index;
+        for(index = 0; index < CandidateList.length; index++){
+            if(CandidateList[index] == candidate){
+                break;
+            }    
+        }
+        return (index, candidateLookup[candidate].pledge, candidateLookup[candidate].memo);
     }
     
     // find index to insert the account by specified candidate in CandidateList
@@ -153,16 +156,26 @@ contract CandidateManage {
         uint currentIndex;
         uint rightIndex;
         for(currentIndex = 0; currentIndex < CandidateList.length; currentIndex++){
-            if(candidateLookup[CandidateList[rightIndex]].pledge > candidateLookup[candidate].pledge){
-                rightIndex++;
-            }
             if(CandidateList[currentIndex] == candidate){
                 break;
             }
+            if(candidateLookup[CandidateList[rightIndex]].pledge >= candidateLookup[candidate].pledge){
+                rightIndex++;
+            }
+            
         }
-        for(uint i = currentIndex; currentIndex > rightIndex; i++){
-            CandidateList[i] = CandidateList[i - 1];
+        
+        // adding
+        if(rightIndex < currentIndex){
+            for(uint i = currentIndex; i > rightIndex; i--){
+                CandidateList[i] = CandidateList[i - 1];
+            }
+        } else {
+            for(uint j = currentIndex; j < rightIndex; j++){
+                CandidateList[j] = CandidateList[j + 1];
+            }
         }
+        
         CandidateList[rightIndex] = candidate;
         return rightIndex;
     }
@@ -179,16 +192,15 @@ contract CandidateManage {
             return (false, errors);
         }
         
+        totalPledge = totalPledge.add(pledge);
+        justitia.lockCount(msg.sender, pledge);
+        balanceOfPledge[msg.sender] = balanceOfPledge[msg.sender].add(pledge);
+        adjustCandidateList(msg.sender, pledge);
         candidate.memo = memo;
         candidate.isValid = true;
         candidate.pledge = pledge;
         candidate.account = msg.sender;
-        candidate.ranking = adjustCandidateList(msg.sender, pledge);
-        
-        justitia.lockCount(msg.sender, pledge);
-        totalPledge = totalPledge.add(pledge);
         candidateLookup[msg.sender] = candidate;
-        balanceOfPledge[msg.sender] = balanceOfPledge[msg.sender].add(pledge);
         emit ApplyToCandidateEvent(msg.sender, true, errors);
         return (true, errors);
     }
@@ -207,10 +219,11 @@ contract CandidateManage {
 contract ElectionManage is CandidateManage {
     
     using SafeMath for uint;
-  
     uint constant ENTRY_HRESHOLD = 100;
+    bool public mainNetSwitch;
     uint constant MAINNET_ONLINE_THRESHOLD = 1000;
     
+    event MainNetOnlineEvent(uint, uint);
     event VottingEvent(address, address, uint);
     event VottingCanceledEvent(address, address, uint);
     
@@ -220,24 +233,39 @@ contract ElectionManage is CandidateManage {
         mapping(address => uint) election; 
     }
     mapping(address => Election) public candidateElection;
-
+    
+    // try to online main network
+    function tryToOnlineMainNet() public {
+        // only state changed, emit event
+        if(!mainNetSwitch){
+            if(totalPledge >= MAINNET_ONLINE_THRESHOLD){
+                mainNetSwitch = true;
+                emit MainNetOnlineEvent(now, totalPledge);
+            }
+        }
+    }
+    
+    
+    function reside(address account) public view returns(uint){
+        return justitia.residePledge(account);
+    }
     
     function vote(address candidate, uint pledge) public {
-        uint8 role = getRole(msg.sender);
-        
         require(isCandidate(candidate));
-        require(!isCandidate(candidate));
+        require(!isCandidate(msg.sender));
         require(pledge <= justitia.residePledge(msg.sender));
         
         if(!candidateElection[candidate].isValid){
             candidateElection[candidate].participates.push(msg.sender);
             candidateElection[candidate].isValid = true;
         }
-        
-        candidateElection[candidate].election[msg.sender] = candidateElection[candidate].election[msg.sender].add(pledge);
         candidateLookup[candidate].pledge = candidateLookup[candidate].pledge.add(pledge);
+        candidateElection[candidate].election[msg.sender] = candidateElection[candidate].election[msg.sender].add(pledge);
         adjustCandidateList(candidate, candidateLookup[candidate].pledge);
+        balanceOfPledge[msg.sender] = balanceOfPledge[msg.sender].add(pledge);
         totalPledge = totalPledge.add(pledge);
+        justitia.lockCount(msg.sender, pledge);
+        
         emit VottingEvent(msg.sender, candidate, pledge);
     }
     
@@ -248,7 +276,10 @@ contract ElectionManage is CandidateManage {
         candidateLookup[candidate].pledge = candidateLookup[candidate].pledge.sub(pledge);
         candidateElection[candidate].election[msg.sender] = candidateElection[candidate].election[msg.sender].sub(pledge);
         adjustCandidateList(candidate, candidateLookup[candidate].pledge);
+        balanceOfPledge[msg.sender] = balanceOfPledge[msg.sender].sub(pledge);
         totalPledge = totalPledge.sub(pledge);
+        justitia.unlockCount(msg.sender, pledge);
+        
         emit VottingCanceledEvent(msg.sender, candidate, pledge);
     }
 }
@@ -256,19 +287,8 @@ contract ElectionManage is CandidateManage {
 
 contract CommunityManage is ElectionManage{
     
-    bool public mainNetSwitch;
-    uint constant MAINNET_ONLINE_THRESHOLD = 1000;
-    
-     event MainNetOnlineEvent(uint, uint, uint);
-    
-    // try to online main network
-    function tryToOnlineMainNet() private {
-        if(!mainNetSwitch){
-            if(totalPledge >= MAINNET_ONLINE_THRESHOLD){
-                mainNetSwitch = true;
-                //emit MainNetOnlineEvent(now, justitia.totalSupply, totalPledge);
-            }
-        }
+    constructor (address token) public {
+        justitia = JustitiaRight(token);
     }
     
     function GetOnlineSymbol() public view returns(bool){
@@ -283,7 +303,8 @@ contract CommunityManage is ElectionManage{
     function Votting(address candidate, uint pledge) public{
         require(isCandidate(candidate));
         vote(candidate, pledge);
-        tryToOnlineMainNet;
+        tryToOnlineMainNet();
     }
+    
 }
 
