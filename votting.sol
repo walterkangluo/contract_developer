@@ -224,17 +224,19 @@ contract ElectionManage is CandidateManage {
     uint constant MAINNET_ONLINE_THRESHOLD = 1000;
     
     event MainNetOnlineEvent(uint, uint);
-    event VottingEvent(address, address, uint);
-    event VottingCanceledEvent(address, address, uint);
+    event IssueVoteEvent(address, address, uint);
+    event AdjustmentVoteEvent(address, address, uint);
     
     struct Election{
         bool isValid;
         address[] participates;
         mapping(address => uint) election; 
     }
+    // record candidate election
     mapping(address => Election) public candidateElection;
     
     // try to online main network
+    // we assume that once mainnet onlie, it will onlie forever 
     function tryToOnlineMainNet() public {
         // only state changed, emit event
         if(!mainNetSwitch){
@@ -245,12 +247,20 @@ contract ElectionManage is CandidateManage {
         }
     }
     
-    
-    function reside(address account) public view returns(uint){
-        return justitia.residePledge(account);
+    // to get the pledge of participate for specified candidate
+    function getPledgeFlow(address candidate, address participate) public view returns(uint){
+        require(isCandidate(candidate));
+        return candidateElection[candidate].election[participate];
     }
     
-    function vote(address candidate, uint pledge) public {
+    // to get all supporters of the specified candidate
+    function getSupportOfCandidate(address candidate) public view returns(address[]){
+        require(isCandidate(candidate));
+        return candidateElection[candidate].participates;
+    }
+    
+    // issue a election for candidate with some pledges
+    function issueVote(address candidate, uint pledge) public {
         require(isCandidate(candidate));
         require(!isCandidate(msg.sender));
         require(pledge <= justitia.residePledge(msg.sender));
@@ -266,10 +276,11 @@ contract ElectionManage is CandidateManage {
         totalPledge = totalPledge.add(pledge);
         justitia.lockCount(msg.sender, pledge);
         
-        emit VottingEvent(msg.sender, candidate, pledge);
+        emit IssueVoteEvent(msg.sender, candidate, pledge);
     }
     
-    function cancelVotted(address candidate, uint pledge) public {
+    // to adjustment of voting for specified candidate with pledge
+    function adjustmentVote(address candidate, uint pledge) public {
         require(isCandidate(candidate));
         require(pledge <= candidateElection[candidate].election[msg.sender]);
         
@@ -280,7 +291,7 @@ contract ElectionManage is CandidateManage {
         totalPledge = totalPledge.sub(pledge);
         justitia.unlockCount(msg.sender, pledge);
         
-        emit VottingCanceledEvent(msg.sender, candidate, pledge);
+        emit AdjustmentVoteEvent(msg.sender, candidate, pledge);
     }
 }
 
@@ -295,14 +306,14 @@ contract CommunityManage is ElectionManage{
         return mainNetSwitch;
     }
     
-    function CancelVote(address candidate, uint canceledPledge) public {
+    function VoteAdjustment(address candidate, uint canceledPledge) public {
         require(isCandidate(candidate));
-        cancelVotted(candidate, canceledPledge);
+        adjustmentVote(candidate, canceledPledge);
     }
     
     function Votting(address candidate, uint pledge) public{
         require(isCandidate(candidate));
-        vote(candidate, pledge);
+        issueVote(candidate, pledge);
         tryToOnlineMainNet();
     }
     
