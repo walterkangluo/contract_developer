@@ -48,9 +48,6 @@ contract CandidateManage {
     
     using SafeMath for uint;
     uint256 public totalPledge;
-    uint8 constant public Normal = 1;
-    uint8 constant public Participate = 2;
-    uint8 constant public Candidator = 3;
     uint constant MINIMUM_PLEDGE_TOKEN = 100;
   
     JustitiaRight public justitia;
@@ -69,22 +66,8 @@ contract CandidateManage {
     // event define
     event ApplyToCandidateEvent(address, bool, string);
     
-    // role classify
-    // normal: account with PR, which has right to vote
-    // participate: normal account which has participate in vote and has peldge currently
-    // candidate: account pledge PR to be a candidate
-    function getRole(address _account) public view returns(uint8){
-        if(isCandidate(_account)){
-            return Candidator;
-        }
-        if (0 != balanceOfPledge[_account]){
-            return Participate;
-        }
-        return Normal;
-    }
-    
     // criterias that be a candidate 
-    function candidateCriteria(address candidate, uint256 pledge) public view returns(bool){
+    function candidateCriteria(address candidate, uint256 pledge) private view returns(bool){
         uint256 balance = justitia.residePledge(candidate);
         if(MINIMUM_PLEDGE_TOKEN <= balance && balance >= pledge){
             return true;
@@ -92,12 +75,29 @@ contract CandidateManage {
         return false;
     }
     
-    // whether the account is candidate
+    // role classify
+    // normal: account with PR, which has right to vote
+    // participate: normal account which has participate in vote and has peldge currently
+    // candidate: account pledge PR to be a candidate
+    function isNormal(address _account) public view returns(bool){
+        if(!isParticipate(_account) && !isCandidate(_account)){
+            return true;
+        }
+        return false;
+    }
+    
+    function isParticipate(address _account) public view returns(bool){
+        if (0 != balanceOfPledge[_account]){
+            return true;
+        }
+        return false;
+    }
+  
     function isCandidate(address account) public view returns(bool){
         return candidateLookup[account].isValid;
     }
     
-    // get pledge balance of address
+    // get account balance statistic
     function balanceStatistic(address _owner) public view returns (uint256 balance, uint256 pledge){
         require(address(0) != _owner);
         
@@ -184,8 +184,9 @@ contract CandidateManage {
     function ApplyToCandidate(uint pledge, string memo) public returns(bool, string){
         string memory errors;
         Candidate memory candidate;
-  
-        require(Normal == getRole(msg.sender));
+
+        require(!isCandidate(msg.sender));
+        
         if(!candidateCriteria(msg.sender, pledge)){
             errors = "errors: some criterias not met.";
             emit ApplyToCandidateEvent(msg.sender, false, errors);
@@ -220,7 +221,7 @@ contract ElectionManage is CandidateManage {
     
     using SafeMath for uint;
     uint constant ENTRY_HRESHOLD = 100;
-    bool public mainNetSwitch;
+    bool private mainNetSwitch;
     uint constant MAINNET_ONLINE_THRESHOLD = 1000;
     
     event MainNetOnlineEvent(uint, uint);
@@ -233,11 +234,16 @@ contract ElectionManage is CandidateManage {
         mapping(address => uint) election; 
     }
     // record candidate election
-    mapping(address => Election) public candidateElection;
+    mapping(address => Election) private candidateElection;
+    
+    
+    constructor (address token) public {
+        justitia = JustitiaRight(token);
+    }
     
     // try to online main network
     // we assume that once mainnet onlie, it will onlie forever 
-    function tryToOnlineMainNet() public {
+    function tryToOnlineMainNet() private {
         // only state changed, emit event
         if(!mainNetSwitch){
             if(totalPledge >= MAINNET_ONLINE_THRESHOLD){
@@ -260,7 +266,7 @@ contract ElectionManage is CandidateManage {
     }
     
     // issue a election for candidate with some pledges
-    function issueVote(address candidate, uint pledge) public {
+    function issueVote(address candidate, uint pledge) private {
         require(isCandidate(candidate));
         require(!isCandidate(msg.sender));
         require(pledge <= justitia.residePledge(msg.sender));
@@ -280,7 +286,7 @@ contract ElectionManage is CandidateManage {
     }
     
     // to adjustment of voting for specified candidate with pledge
-    function adjustmentVote(address candidate, uint pledge) public {
+    function adjustmentVote(address candidate, uint pledge) private {
         require(isCandidate(candidate));
         require(pledge <= candidateElection[candidate].election[msg.sender]);
         
@@ -292,14 +298,6 @@ contract ElectionManage is CandidateManage {
         justitia.unlockCount(msg.sender, pledge);
         
         emit AdjustmentVoteEvent(msg.sender, candidate, pledge);
-    }
-}
-
-
-contract CommunityManage is ElectionManage{
-    
-    constructor (address token) public {
-        justitia = JustitiaRight(token);
     }
     
     function GetOnlineSymbol() public view returns(bool){
@@ -316,6 +314,6 @@ contract CommunityManage is ElectionManage{
         issueVote(candidate, pledge);
         tryToOnlineMainNet();
     }
-    
 }
+
 
