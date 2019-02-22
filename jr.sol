@@ -189,7 +189,7 @@ contract JRBase is ERC20,Lockable{
     }
     
     // 查询可抵押余额：返回可用于抵押的额度
-    function residePledge(address _owner) public view returns(uint){
+    function residePledge(address _owner) public view returns(uint balance){
         return balanceOf[_owner].sub(lockStatistic[_owner]);
     }
  
@@ -228,7 +228,7 @@ contract JRBase is ERC20,Lockable{
     }
 }
 
-contract JustitiaRepution is JRBase {
+contract JustitiaRight is JRBase {
     uint public ratio;
     event IssueEvent(address _to, uint _balance);
     
