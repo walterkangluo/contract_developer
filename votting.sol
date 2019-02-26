@@ -143,8 +143,10 @@ contract CandidateManage {
         CandidateList.push(applicant);
         for(uint i = CandidateList.length - 1; i > index; i--){
             CandidateList[i] = CandidateList[i - 1];
+            candidateLookup[CandidateList[i]].ranking = i;
         }
         CandidateList[index] = applicant;
+        candidateLookup[CandidateList[index]].ranking = index;
         return index;
     }
     
@@ -170,24 +172,25 @@ contract CandidateManage {
         if(rightIndex < currentIndex){
             for(uint i = currentIndex; i > rightIndex; i--){
                 CandidateList[i] = CandidateList[i - 1];
+                candidateLookup[CandidateList[i]].ranking = i;
             }
         } else {
             for(uint j = currentIndex; j < rightIndex; j++){
                 CandidateList[j] = CandidateList[j + 1];
+                candidateLookup[CandidateList[j]].ranking = j;
             }
         }
         
         CandidateList[rightIndex] = candidate;
+        candidateLookup[CandidateList[rightIndex]].ranking = rightIndex;
         return rightIndex;
     }
     
     // apply to candidate 
     function ApplyToCandidate(uint pledge, string memo) public returns(bool, string){
-        string memory errors;
-        Candidate memory candidate;
-
         require(!isCandidate(msg.sender));
         
+        string memory errors;
         if(!candidateCriteria(msg.sender, pledge)){
             errors = "errors: some criterias not met.";
             emit ApplyToCandidateEvent(msg.sender, false, errors);
@@ -197,11 +200,11 @@ contract CandidateManage {
         totalPledge = totalPledge.add(pledge);
         justitia.lockCount(msg.sender, pledge);
         balanceOfPledge[msg.sender] = balanceOfPledge[msg.sender].add(pledge);
-        candidate.memo = memo;
-        candidate.isValid = true;
-        candidate.pledge = pledge;
-        candidate.account = msg.sender;
-        candidateLookup[msg.sender] = candidate;
+        adjustCandidateList(msg.sender, pledge);
+        candidateLookup[msg.sender].memo = memo;
+        candidateLookup[msg.sender].isValid = true;
+        candidateLookup[msg.sender].pledge = candidateLookup[msg.sender].pledge.add(pledge);
+        candidateLookup[msg.sender].account = msg.sender;
         emit ApplyToCandidateEvent(msg.sender, true, errors);
         return (true, errors);
     }
@@ -402,8 +405,8 @@ contract ElectionManage is CandidateManage, BlackListManage {
     }
     
     function rightToVoteBlackList(address _account) private view returns(bool){
-        uint rank = ranking(_account);
-        if(rank <= totalNodes){
+        require(isCandidate(_account));
+        if(candidateLookup[_account].ranking < totalNodes){
             return true;
         }
         return false;
@@ -425,12 +428,9 @@ contract ElectionManage is CandidateManage, BlackListManage {
     }
     
     function SetBlackList(address _account) public{
-        require(isCandidate(msg.sender));
         require(rightToVoteBlackList(msg.sender));
-        if(!isInBlackList(msg.sender)){
+        if(!isInBlackList(_account)){
             voteForBlacklist(_account, "errors");
         }
     }
 }
-
-
