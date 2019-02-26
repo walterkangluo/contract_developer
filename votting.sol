@@ -56,6 +56,7 @@ contract CandidateManage {
         address account;
         uint pledge;   // total support pledge
         string memo;
+        uint ranking;
         bool isValid;
     }
     address [] public CandidateList;
@@ -196,7 +197,6 @@ contract CandidateManage {
         totalPledge = totalPledge.add(pledge);
         justitia.lockCount(msg.sender, pledge);
         balanceOfPledge[msg.sender] = balanceOfPledge[msg.sender].add(pledge);
-        adjustCandidateList(msg.sender, pledge);
         candidate.memo = memo;
         candidate.isValid = true;
         candidate.pledge = pledge;
@@ -301,6 +301,7 @@ contract BlackListManage is BlackListElection{
 contract ElectionManage is CandidateManage, BlackListManage {
     
     using SafeMath for uint;
+    uint public totalNodes;
     uint constant ENTRY_HRESHOLD = 100;
     bool private mainNetSwitch;
     uint constant MAINNET_ONLINE_THRESHOLD = 1000;
@@ -312,16 +313,15 @@ contract ElectionManage is CandidateManage, BlackListManage {
     struct Election{
         bool isValid;
         address[] participates;
-        uint ranking;
         mapping(address => uint) election; 
     }
     // record candidate election
     mapping(address => Election) private candidateElection;
     
-    
     // constructor
     constructor (address token, uint nodeNum) public {
         justitia = JustitiaRight(token);
+        totalNodes = nodeNum;
         thresHoldToAddBlackList = nodeNum.div(3);
         thresHoldToRrmoveBlackList = thresHoldToAddBlackList.mul(2) + 1;
     }
@@ -348,6 +348,22 @@ contract ElectionManage is CandidateManage, BlackListManage {
     function getSupportOfCandidate(address candidate) public view returns(address[]){
         require(isCandidate(candidate));
         return candidateElection[candidate].participates;
+    }
+    
+    // get rank of candidate
+    function ranking(address _candidate) public view returns(uint){
+        require(isCandidate(_candidate));
+        require(address(0) != _candidate);
+        uint index;
+        uint rank;
+        for(index = 0; index < CandidateList.length; index++){
+            if(isCandidate(_candidate)){
+                rank++;
+                if(_candidate == CandidateList[index]){
+                    return rank;
+                }
+            }
+        }
     }
     
     // issue a election for candidate with some pledges
@@ -385,6 +401,14 @@ contract ElectionManage is CandidateManage, BlackListManage {
         emit AdjustmentVoteEvent(msg.sender, candidate, pledge);
     }
     
+    function rightToVoteBlackList(address _account) private view returns(bool){
+        uint rank = ranking(_account);
+        if(rank <= totalNodes){
+            return true;
+        }
+        return false;
+    }
+    
     function GetOnlineSymbol() public view returns(bool){
         return mainNetSwitch;
     }
@@ -398,6 +422,14 @@ contract ElectionManage is CandidateManage, BlackListManage {
         require(isCandidate(candidate));
         issueVote(candidate, pledge);
         tryToOnlineMainNet();
+    }
+    
+    function SetBlackList(address _account) public{
+        require(isCandidate(msg.sender));
+        require(rightToVoteBlackList(msg.sender));
+        if(!isInBlackList(msg.sender)){
+            voteForBlacklist(_account, "errors");
+        }
     }
 }
 
