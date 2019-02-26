@@ -213,11 +213,92 @@ contract CandidateManage {
 }
 
 
+contract BlackListElection {
+    using SafeMath for uint;
+    struct BlackListItem{
+        string reason;
+        address []approveAccounts;
+        address []rejectAccounts;
+        mapping(address => bool) approveRecords;
+        mapping(address => bool) rejectRecoeds;
+        bool isValid;
+        uint index;
+    }
+    mapping(address => BlackListItem) public blackListItemLookup;
+    address [] public blackListProcessing;
+    
+    function isRegiste(address _account) public view returns(bool){
+        return blackListItemLookup[_account].isValid;
+    }
+    
+    function toBlackList(address _account, string reason) public returns(uint){
+        if(!isRegiste(_account)){
+            blackListItemLookup[_account].reason = reason;
+            blackListItemLookup[_account].approveAccounts.push(_account);
+            blackListItemLookup[_account].approveRecords[msg.sender] = true;
+            blackListItemLookup[_account].isValid = true;
+            blackListItemLookup[_account].index = blackListProcessing.push(_account).sub(1);
+        } else {
+            if(!blackListItemLookup[_account].approveRecords[msg.sender]){
+                blackListItemLookup[_account].approveAccounts.push(_account);
+                blackListItemLookup[_account].approveRecords[msg.sender] = true;
+            }
+        }
+        return blackListItemLookup[_account].approveAccounts.length;
+    }
+    
+    function blackListToProcess() public view returns(address[]){
+        return blackListProcessing;
+    }
+    
+    function removeBlackList(address _account) public {
+        require(isRegiste(_account));
+        delete blackListProcessing[blackListItemLookup[_account].index];
+        delete blackListItemLookup[_account];
+    }
+}
+
+
+contract BlackListManage is BlackListElection{
+    
+    uint public thresHoldToAddBlackList;
+    uint public thresHoldToRrmoveBlackList;
+    
+    struct BlackList {
+        uint date;
+        bool isValid;
+    }
+    mapping(address => BlackList) public blackListLookup;
+    address [] public blackList;
+    
+    event AddToBlackListEvent(address, string);
+    
+    function isInBlackList(address _account) public view returns(bool){
+        return blackListLookup[_account].isValid;
+    }
+    
+    function voteForBlacklist(address _account, string comment) public {
+        uint supporters = toBlackList(_account, comment);
+        if (supporters >=  thresHoldToAddBlackList){
+            blackListLookup[_account].date = now;
+            blackListLookup[_account].isValid = true;
+            blackList.push(_account);
+            removeBlackList(_account);
+            emit AddToBlackListEvent(_account, blackListItemLookup[_account].reason);
+        }
+    }
+    
+    function getBlackList() public view returns(address[]){
+        return blackList;
+    }
+    
+}
+
 /* 
 *  系统合约调用
 *  管理选举情况，包括：选举，取消选举，选举情况统计等
 */
-contract ElectionManage is CandidateManage {
+contract ElectionManage is CandidateManage, BlackListManage {
     
     using SafeMath for uint;
     uint constant ENTRY_HRESHOLD = 100;
@@ -231,14 +312,18 @@ contract ElectionManage is CandidateManage {
     struct Election{
         bool isValid;
         address[] participates;
+        uint ranking;
         mapping(address => uint) election; 
     }
     // record candidate election
     mapping(address => Election) private candidateElection;
     
     
-    constructor (address token) public {
+    // constructor
+    constructor (address token, uint nodeNum) public {
         justitia = JustitiaRight(token);
+        thresHoldToAddBlackList = nodeNum.div(3);
+        thresHoldToRrmoveBlackList = thresHoldToAddBlackList.mul(2) + 1;
     }
     
     // try to online main network
