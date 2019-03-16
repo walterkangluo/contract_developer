@@ -55,7 +55,8 @@ contract CandidateManage {
     struct Candidate{
         address account;
         uint pledge;   // total support pledge
-        string memo;
+        string memo;   // candidate describe
+        string url;
         uint ranking;
         bool isValid;
     }
@@ -65,7 +66,7 @@ contract CandidateManage {
     mapping(address => uint256) public balanceOfPledge;
 
     // event define
-    event ApplyToCandidateEvent(address, bool, string);
+    event ApplyToCandidateEvent(address, string, bool, string);
     
     // criterias that be a candidate 
     function candidateCriteria(address candidate, uint256 pledge) private view returns(bool){
@@ -77,9 +78,9 @@ contract CandidateManage {
     }
     
     // role classify
-    // normal: account with PR, which has right to vote
-    // participate: normal account which has participate in vote and has peldge currently
-    // candidate: account pledge PR to be a candidate
+    // normal: account with JR, which has right to vote and to be a candidate
+    // participate: normal account which has participate in vote and has deposit peldge to some one
+    // candidate: account who deposit pledge of JR to be a candidate
     function isNormal(address _account) public view returns(bool){
         if(!isParticipate(_account) && !isCandidate(_account)){
             return true;
@@ -88,7 +89,7 @@ contract CandidateManage {
     }
     
     function isParticipate(address _account) public view returns(bool){
-        if (0 != balanceOfPledge[_account]){
+        if (0 != balanceOfPledge[_account] && !isCandidate(_account)){
             return true;
         }
         return false;
@@ -98,31 +99,32 @@ contract CandidateManage {
         return candidateLookup[account].isValid;
     }
     
-    // get account balance statistic
-    function balanceStatistic(address _owner) public view returns (uint256 balance, uint256 pledge){
-        require(address(0) != _owner);
+    // get balance statistic of the _account
+    function balanceStatistic(address _account) public view returns (uint256 balance, uint256 pledge){
+        require(address(0) != _account);
         
         uint256 total;
         uint256 reside;
         
-        total = justitia.balanceOf(_owner);
-        reside = justitia.residePledge(_owner);
+        total = justitia.balanceOf(_account);
+        reside = justitia.residePledge(_account);
         
-        require(total.sub(reside) == balanceOfPledge[_owner]);
+        require(total.sub(reside) == balanceOfPledge[_account]);
         
-        return (total, balanceOfPledge[_owner]);
+        return (total, balanceOfPledge[_account]);
     }
     
-    // get candidate information
-    function candidateState(address candidate) public view returns(uint256, uint256, string){
+    // get candidate detail, return rank and pledge for now
+    function candidateState(address candidate) public view returns(uint256, uint256, string, string, uint256){
         require(isCandidate(candidate));
-        uint index;
+        uint index;                                         
         for(index = 0; index < CandidateList.length; index++){
             if(CandidateList[index] == candidate){
                 break;
             }    
         }
-        return (index, candidateLookup[candidate].pledge, candidateLookup[candidate].memo);
+        return (index, candidateLookup[candidate].pledge, candidateLookup[candidate].memo, 
+        candidateLookup[candidate].url, candidateLookup[candidate].ranking);
     }
     
     // find index to insert the account by specified candidate in CandidateList
@@ -155,7 +157,6 @@ contract CandidateManage {
         if(!isCandidate(candidate)){
             return addToCandidateListDescending(candidate, pledge);
         } 
-        
         uint currentIndex;
         uint rightIndex;
         for(currentIndex = 0; currentIndex < CandidateList.length; currentIndex++){
@@ -167,7 +168,6 @@ contract CandidateManage {
             }
             
         }
-        
         // adding
         if(rightIndex < currentIndex){
             for(uint i = currentIndex; i > rightIndex; i--){
@@ -180,20 +180,19 @@ contract CandidateManage {
                 candidateLookup[CandidateList[j]].ranking = j;
             }
         }
-        
         CandidateList[rightIndex] = candidate;
         candidateLookup[CandidateList[rightIndex]].ranking = rightIndex;
         return rightIndex;
     }
     
     // apply to candidate 
-    function ApplyToCandidate(uint pledge, string memo) public returns(bool, string){
+    function ApplyToCandidate(uint pledge, string memo, string url) public returns(bool, string){
         require(!isCandidate(msg.sender));
         
         string memory errors;
         if(!candidateCriteria(msg.sender, pledge)){
             errors = "errors: some criterias not met.";
-            emit ApplyToCandidateEvent(msg.sender, false, errors);
+            emit ApplyToCandidateEvent(msg.sender, memo, false, errors);
             return (false, errors);
         }
         
@@ -202,10 +201,11 @@ contract CandidateManage {
         balanceOfPledge[msg.sender] = balanceOfPledge[msg.sender].add(pledge);
         adjustCandidateList(msg.sender, pledge);
         candidateLookup[msg.sender].memo = memo;
+        candidateLookup[msg.sender].url = url;
         candidateLookup[msg.sender].isValid = true;
         candidateLookup[msg.sender].pledge = candidateLookup[msg.sender].pledge.add(pledge);
         candidateLookup[msg.sender].account = msg.sender;
-        emit ApplyToCandidateEvent(msg.sender, true, errors);
+        emit ApplyToCandidateEvent(msg.sender, memo, true, errors);
         return (true, errors);
     }
     
@@ -322,10 +322,16 @@ contract ElectionManage is CandidateManage, BlackListManage {
     mapping(address => Election) private candidateElection;
     
     // constructor
-    constructor (address token, uint nodeNum) public {
-        justitia = JustitiaRight(token);
-        totalNodes = nodeNum;
-        thresHoldToAddBlackList = nodeNum.div(3);
+    constructor () public {
+        justitia = JustitiaRight(0x0dcd2f752394c41875e259e00bb44fd505297caf);
+        totalNodes = 4;
+        thresHoldToAddBlackList = totalNodes.div(3);
+        thresHoldToRrmoveBlackList = thresHoldToAddBlackList.mul(2) + 1;
+    }
+    
+    function setNodeNum(uint256 number) public {
+        totalNodes = number;
+        thresHoldToAddBlackList = totalNodes.div(3);
         thresHoldToRrmoveBlackList = thresHoldToAddBlackList.mul(2) + 1;
     }
     
